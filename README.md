@@ -10,7 +10,7 @@ brew install python@3.12          # if you don't have Python 3.11+
 scripts/install_mac_app.sh
 ```
 
-This installs **SynthRAD Viewer** into `~/Applications`, so it opens from Launchpad,
+This installs **SynthRAD Viewer** into `/Applications`, so it opens from Launchpad,
 Spotlight or the Dock. Code changes in this folder take effect the next time the app
 starts. Run the script again only if you move this folder or upgrade Python.
 

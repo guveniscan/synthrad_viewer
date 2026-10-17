@@ -1,10 +1,13 @@
 #!/bin/bash
 # One-time setup: creates the Python environment and installs "SynthRAD Viewer" into
-# ~/Applications, so it opens from Launchpad, Spotlight or the Dock like any other app.
+# /Applications, so it opens from Launchpad, Spotlight or the Dock like any other app.
 # Run it again after moving this folder. Code changes need no reinstall.
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-APP="${APP_DIR:-$HOME/Applications}/SynthRAD Viewer.app"
+# /Applications when writable (the folder Finder's sidebar shows), else ~/Applications.
+DEFAULT_DIR=/Applications
+[ -w "$DEFAULT_DIR" ] || DEFAULT_DIR="$HOME/Applications"
+APP="${APP_DIR:-$DEFAULT_DIR}/SynthRAD Viewer.app"
 
 PY=$(command -v python3.12 || command -v python3.13 || command -v python3.11 || true)
 [ -n "$PY" ] || { echo "Python 3.11+ not found. Install it with: brew install python@3.12"; exit 1; }
