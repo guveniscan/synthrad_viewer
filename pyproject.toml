@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "synthrad-viewer"
+description = "Desktop viewer for the SynthRAD2025 CT, MRI and CBCT datasets"
+readme = "README.md"
+requires-python = ">=3.10"
+dynamic = ["version"]
+dependencies = [
+    "PySide6>=6.6",
+    "pyqtgraph>=0.13.4",
+    "SimpleITK>=2.3",
+    "numpy>=1.24",
+    "pyobjc-framework-Cocoa; sys_platform == 'darwin'",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.gui-scripts]
+synthrad-viewer = "synthrad_viewer.app:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "synthrad_viewer.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["synthrad_viewer*"]
