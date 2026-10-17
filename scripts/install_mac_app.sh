@@ -21,26 +21,13 @@ ICONSET="$(mktemp -d)/AppIcon.iconset"
 "$REPO/.venv/bin/python" -m synthrad_viewer.icon "$ICONSET"
 iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 
-# Run a copy of the framework's GUI interpreter from inside this bundle, so macOS shows
-# "SynthRAD Viewer" (Dock, ⌘-Tab, Activity Monitor) instead of "Python". The venv is
-# selected with __PYVENV_LAUNCHER__, the same variable Python's own launcher sets.
-GUIPY="$("$REPO/.venv/bin/python" -c 'import sys; print(sys.base_prefix)')/Resources/Python.app/Contents/MacOS/Python"
-if [ -x "$GUIPY" ]; then
-  cp "$GUIPY" "$APP/Contents/MacOS/SynthRAD Viewer"
-fi
-
-cat > "$APP/Contents/MacOS/launcher" <<SH
-#!/bin/bash
-HERE="\$(cd "\$(dirname "\$0")" && pwd)"
-export __PYVENV_LAUNCHER__="$REPO/.venv/bin/python"
-# After a Python upgrade the bundled copy can no longer find its framework; fall back.
-if "\$HERE/SynthRAD Viewer" -c "" 2>/dev/null; then
-  exec "\$HERE/SynthRAD Viewer" -m synthrad_viewer "\$@"
-fi
-unset __PYVENV_LAUNCHER__
-exec "$REPO/.venv/bin/python" -m synthrad_viewer "\$@"
-SH
-chmod +x "$APP/Contents/MacOS/launcher"
+# A small native launcher runs a copy of the framework's GUI interpreter from inside this
+# bundle, so macOS shows "SynthRAD Viewer" (Dock, ⌘-Tab, Activity Monitor) rather than
+# "Python". See scripts/launcher.c.
+BASE="$("$REPO/.venv/bin/python" -c 'import sys; print(sys.base_prefix)')"
+cp "$BASE/Resources/Python.app/Contents/MacOS/Python" "$APP/Contents/MacOS/SynthRAD Viewer"
+clang -O2 -Wall -o "$APP/Contents/MacOS/launcher" "$REPO/scripts/launcher.c" \
+  -DVENV_PYTHON="\"$REPO/.venv/bin/python\"" -DFRAMEWORK_DYLIB="\"$BASE/Python\""
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -59,5 +46,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </dict>
 </plist>
 PLIST
+# Ad-hoc signature: without one, Finder marks the app as unable to run.
+codesign --force --deep --sign - "$APP"
 touch "$APP"
+/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$APP"
 echo "Installed: $APP"
