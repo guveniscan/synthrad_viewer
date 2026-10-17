@@ -544,8 +544,8 @@ class MainWindow(QMainWindow):
     def apply_window(self):
         if self.current is None:
             return
-        # MRI and CBCT values are not calibrated HU (center D's CBCT sits hundreds of HU
-        # below its CT), so they are always windowed per image.
+        # MRI and CBCT values are not calibrated HU (CBCT can sit hundreds of HU below its
+        # CT), so they are always windowed per image.
         self.grid.set_levels("source", *self.current.auto["source"])
         ct = self.current.auto["ct"] if self.preset == AUTO else preset_levels(self.preset)
         self.grid.set_levels("ct", *ct)

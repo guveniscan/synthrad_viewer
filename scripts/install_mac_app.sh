@@ -24,8 +24,19 @@ iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
 # A small native launcher runs a copy of the framework's GUI interpreter from inside this
 # bundle, so macOS shows "SynthRAD Viewer" (Dock, ⌘-Tab, Activity Monitor) rather than
 # "Python". See scripts/launcher.c.
+# Without a framework build of Python (conda, uv, pyenv without --enable-framework) there is
+# no GUI interpreter to copy; the launcher then starts the venv's python directly.
+command -v clang >/dev/null || {
+  echo "A C compiler is needed. Install Apple's command line tools with: xcode-select --install"
+  exit 1
+}
 BASE="$("$REPO/.venv/bin/python" -c 'import sys; print(sys.base_prefix)')"
-cp "$BASE/Resources/Python.app/Contents/MacOS/Python" "$APP/Contents/MacOS/SynthRAD Viewer"
+GUIPY="$BASE/Resources/Python.app/Contents/MacOS/Python"
+if [ -x "$GUIPY" ]; then
+  cp "$GUIPY" "$APP/Contents/MacOS/SynthRAD Viewer"
+else
+  echo "Note: $(basename "$BASE") is not a framework build; the Dock may show the app as Python."
+fi
 clang -O2 -Wall -o "$APP/Contents/MacOS/launcher" "$REPO/scripts/launcher.c" \
   -DVENV_PYTHON="\"$REPO/.venv/bin/python\"" -DFRAMEWORK_DYLIB="\"$BASE/Python\""
 
