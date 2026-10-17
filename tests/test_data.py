@@ -70,3 +70,61 @@ def test_auto_levels_ignore_padding_and_use_mask():
     mask = np.zeros(data.shape, bool)
     mask[2:4, 2:8, 2:8] = True
     assert auto_levels(data, mask, low=0, high=100)[1] == 71.0
+
+
+def test_comparison_images():
+    from synthrad_viewer.volume import checkerboard, colour_overlay, difference, normalise
+
+    ct = np.array([[100, 200], [300, 400]], np.int16)
+    cbct = np.array([[50, 250], [300, 0]], np.int16)
+    mask = np.array([[True, True], [False, True]])
+    assert difference(ct, cbct, mask).tolist() == [[50, -50], [0, 400]]
+    a, b = normalise(cbct, (0, 400)), normalise(ct, (0, 400))
+    assert normalise(np.array([-10, 200, 999]), (0, 400)).tolist() == [0, 0.5, 1]
+    board = checkerboard(np.zeros((4, 4)), np.ones((4, 4)), (2, 2))
+    assert board[:, 0].tolist() == [0, 0, 1, 1] and board[0].tolist() == [0, 0, 1, 1]
+    rgb = colour_overlay(b, a)
+    assert rgb.shape == (2, 2, 3) and np.array_equal(rgb[..., 0], b) and np.array_equal(rgb[..., 1], a)
+
+
+def test_mask_overlay_outline():
+    from synthrad_viewer.views import mask_overlay
+
+    m = np.zeros((5, 5), bool)
+    m[1:4, 1:4] = True
+    outline = mask_overlay(m, "outline")[..., 3] > 0
+    assert outline.sum() == 8 and not outline[2, 2]  # ring around the centre
+    assert (mask_overlay(m, "dim")[..., 3] > 0).sum() == 25 - 9
+    assert mask_overlay(m, "off") is None
+
+
+def test_metadata_formats_and_rejects_garbage(tmp_path):
+    import openpyxl
+
+    from synthrad_viewer.dataset import Case
+    from synthrad_viewer.metadata import MetadataIndex
+
+    region = tmp_path / "Task2" / "AB"
+    (region / "overviews").mkdir(parents=True)
+    wb = openpyxl.Workbook()
+    header = ["ID", "PatientSex", "PatientAge", "StudyDate", "KVP", "SliceThickness",
+              "Manufacturer", "ManufacturerModelName", "PixelSpacing"]
+    cbct = wb.active
+    cbct.title = "CBCT"
+    cbct.append(header)
+    cbct.append(["2ABD001", "M", "empty", 20240103, 120, 89999997615814, "ELEKTA",
+                 "Elekta XVI", "[1, 1]"])
+    ct = wb.create_sheet("CT")
+    ct.append(header)
+    ct.append(["2ABD001", "M", "077Y", 20231229, "-", 2, "SIEMENS", "SOMATOM", "[0.98, 0.98]"])
+    wb.save(region / "overviews" / "2_AB_train_parameters.xlsx")
+
+    info = MetadataIndex().info(Case("2ABD001", 2, "AB", region / "2ABD001", "cbct"))
+    assert dict(info.patient) == {"Sex": "Male", "Age": "77 years",
+                                  "Scans": "CBCT 5 days after the CT"}
+    cbct_rows = dict(info.scans["CBCT"])
+    assert cbct_rows["Scanner"] == "Elekta XVI" and cbct_rows["Tube voltage"] == "120 kV"
+    assert "Slice thickness" not in cbct_rows  # garbled value dropped
+    ct_rows = dict(info.scans["CT"])
+    assert ct_rows["Scanner"] == "Siemens SOMATOM" and "Tube voltage" not in ct_rows
+    assert info.overview is None

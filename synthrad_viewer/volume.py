@@ -18,6 +18,7 @@ import SimpleITK as sitk
 from .dataset import Case
 
 PLANES = ("axial", "coronal", "sagittal")
+PLANE_AXIS = {"axial": 2, "coronal": 1, "sagittal": 0}  # index into (x, y, z)
 
 # Screen edge -> patient direction, per plane.
 ORIENTATION_LABELS = {
@@ -111,10 +112,9 @@ def load_volume(path) -> Volume:
                   tuple(image.GetOrigin()))
 
 
-def auto_levels(data: np.ndarray, mask: np.ndarray | None = None,
-                low: float = 1.0, high: float = 99.5) -> tuple[float, float]:
-    """Percentile window inside the body mask, ignoring padding at the minimum value
-    (CBCT is filled with -1024 outside its field of view)."""
+def body_values(data: np.ndarray, mask: np.ndarray | None = None) -> np.ndarray:
+    """Values inside the body mask, without padding at the minimum value (CBCT is filled
+    with -1024 outside its field of view), subsampled to at most ~2M."""
     if mask is not None and mask.shape == data.shape and mask.any():
         values = data[mask]
     else:
@@ -125,8 +125,25 @@ def auto_levels(data: np.ndarray, mask: np.ndarray | None = None,
         values = inside
     if values.size > 2_000_000:
         values = values[:: values.size // 2_000_000 + 1]
+    return values
+
+
+def auto_levels(data: np.ndarray, mask: np.ndarray | None = None,
+                low: float = 1.0, high: float = 99.5) -> tuple[float, float]:
+    """Percentile window inside the body mask."""
+    values = body_values(data, mask)
     lo, hi = (float(p) for p in np.percentile(values, [low, high]))
     return (lo, hi) if hi > lo else (lo, lo + 1.0)
+
+
+def histogram(data: np.ndarray, mask: np.ndarray | None = None, bins: int = 160):
+    """(bin edges, counts) of the values inside the body, between the 0.1/99.9 percentiles."""
+    values = body_values(data, mask)
+    lo, hi = np.percentile(values, [0.1, 99.9])
+    if hi <= lo:
+        hi = lo + 1
+    counts, edges = np.histogram(values, bins=bins, range=(lo, hi))
+    return edges, counts
 
 
 @dataclass
@@ -134,8 +151,10 @@ class LoadedCase:
     case: Case
     source: Volume  # MRI or CBCT
     ct: Volume
-    mask: np.ndarray | None
+    mask: Volume | None  # boolean body mask on the same grid
     auto: dict[str, tuple[float, float]] = field(default_factory=dict)  # "source"/"ct"
+    hist: dict[str, tuple[np.ndarray, np.ndarray]] = field(default_factory=dict)
+    info: object = None  # metadata.CaseInfo, filled in by the loader
 
 
 def load_case(case: Case) -> LoadedCase:
@@ -143,13 +162,50 @@ def load_case(case: Case) -> LoadedCase:
     ct = load_volume(case.file("ct"))
     mask = None
     if case.file("mask").exists():
-        m = load_volume(case.file("mask")).data > 0
-        if m.shape == ct.data.shape:
-            mask = m
-    return LoadedCase(case, source, ct, mask, {
-        "source": auto_levels(source.data, mask),
-        "ct": auto_levels(ct.data, mask),
-    })
+        m = load_volume(case.file("mask"))
+        if m.data.shape == ct.data.shape:
+            mask = Volume(m.data > 0, m.spacing, m.origin)
+    m = mask.data if mask is not None else None
+    return LoadedCase(
+        case, source, ct, mask,
+        auto={"source": auto_levels(source.data, m), "ct": auto_levels(ct.data, m)},
+        hist={"source": histogram(source.data, m), "ct": histogram(ct.data, m)},
+    )
+
+
+# -- comparison images -------------------------------------------------------------------
+
+COMPARE_MODES = {
+    "off": "Off",
+    "difference": "Difference",
+    "checkerboard": "Checkerboard",
+    "overlay": "Colour overlay",
+}
+
+
+def normalise(image: np.ndarray, levels: tuple[float, float]) -> np.ndarray:
+    lo, hi = levels
+    return np.clip((image.astype(np.float32) - lo) / max(hi - lo, 1e-6), 0.0, 1.0)
+
+
+def difference(ct: np.ndarray, source: np.ndarray, mask: np.ndarray | None) -> np.ndarray:
+    """CT - source in HU, zero outside the body."""
+    diff = ct.astype(np.float32) - source.astype(np.float32)
+    if mask is not None:
+        diff[~mask] = 0.0
+    return diff
+
+
+def checkerboard(a: np.ndarray, b: np.ndarray, tile_px: tuple[int, int]) -> np.ndarray:
+    """Alternate tiles of two images in [0, 1]; ``tile_px`` is (rows, cols) per tile."""
+    rows = np.arange(a.shape[0])[:, None] // max(1, tile_px[0])
+    cols = np.arange(a.shape[1])[None, :] // max(1, tile_px[1])
+    return np.where((rows + cols) % 2 == 0, a, b)
+
+
+def colour_overlay(ct: np.ndarray, source: np.ndarray) -> np.ndarray:
+    """CT in magenta, source in green (images in [0, 1]): aligned structures look grey."""
+    return np.stack([ct, source, ct], axis=-1)
 
 
 class CaseCache:
